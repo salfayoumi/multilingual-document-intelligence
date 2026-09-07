@@ -1,0 +1,31 @@
+[
+  {
+    "query": "When should a vibration warning be escalated?",
+    "relevant_sources": ["maintenance_en.md"]
+  },
+  {
+    "query": "What temperature requires the equipment to be stopped?",
+    "relevant_sources": ["maintenance_en.md"]
+  },
+  {
+    "query": "Ana hat filtresi kaç çalışma saatinde değiştirilir?",
+    "relevant_sources": ["maintenance_tr.md"]
+  },
+  {
+    "query": "Bir üretim partisi ne zaman karantinaya alınır?",
+    "relevant_sources": ["quality_tr.md"]
+  },
+  {
+    "query": "من يستطيع إزالة بطاقة القفل بعد الصيانة؟",
+    "relevant_sources": ["safety_ar.md"]
+  },
+  {
+    "query": "متى يُراجع قائد الوردية تقرير الحادث؟",
+    "relevant_sources": ["incident_ar.md"]
+  },
+  {
+    "query": "How soon should a repaired air leak be measured again?",
+    "relevant_sources": ["energy_en.md"]
+  }
+]
+

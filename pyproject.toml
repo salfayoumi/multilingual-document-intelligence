@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multilingual-document-intelligence"
+version = "0.1.0"
+description = "Citation-first multilingual document retrieval and grounded question answering"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Salsabeel Alfayoumi" }]
+dependencies = [
+  "numpy>=1.26,<3",
+  "scikit-learn>=1.4,<2",
+  "pypdf>=5,<7",
+  "python-docx>=1.1,<2",
+  "python-dotenv>=1.0,<2",
+]
+
+[project.optional-dependencies]
+app = [
+  "fastapi>=0.115,<1",
+  "python-multipart>=0.0.20,<1",
+  "streamlit>=1.42,<2",
+  "uvicorn[standard]>=0.34,<1",
+]
+semantic = ["sentence-transformers>=3.4,<6"]
+dev = [
+  "pytest>=8.3,<10",
+  "pytest-cov>=6,<8",
+  "httpx>=0.28,<1",
+  "ruff>=0.9,<1",
+]
+
+[project.scripts]
+document-intelligence-demo = "document_intelligence.demo:main"
+document-intelligence-evaluate = "document_intelligence.evaluation:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
