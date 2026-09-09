@@ -18,11 +18,10 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install project
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[app,dev]"
       - name: Lint
         run: ruff check .
       - name: Test
         run: pytest --cov=document_intelligence --cov-report=term-missing
       - name: Run retrieval benchmark
         run: python -m document_intelligence.evaluation --top-k 3
-
