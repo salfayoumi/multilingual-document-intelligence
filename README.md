@@ -4,6 +4,8 @@ A citation-first document retrieval and question-answering system for **Arabic, 
 
 This is an applied-AI engineering project, not a production compliance system. The included documents are fictional technical examples created for reproducible testing.
 
+**[Try the live demo](https://multilingual-document-intelligence.streamlit.app/)**
+
 ![Multilingual Document Intelligence interface preview](assets/project-cover.svg)
 
 ## What it does
