@@ -64,7 +64,7 @@ class Answerer(Protocol):
 class ExtractiveAnswerer:
     mode = "extractive-citation-first"
 
-    def __init__(self, *, minimum_dense_score: float = 0.05, max_sources: int = 3) -> None:
+    def __init__(self, *, minimum_dense_score: float = 0.05, max_sources: int = 1) -> None:
         self.minimum_dense_score = minimum_dense_score
         self.max_sources = max_sources
 
@@ -168,4 +168,3 @@ def create_answerer() -> Answerer:
     if base_url and api_key and model:
         return OpenAICompatibleAnswerer(base_url, api_key, model)
     return ExtractiveAnswerer()
-
