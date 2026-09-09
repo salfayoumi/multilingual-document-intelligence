@@ -43,6 +43,11 @@ class RetrievalTests(unittest.TestCase):
         self.assertIn("[1]", answer.text)
         self.assertEqual(answer.citations[0].source, "motor.md")
 
+    def test_extractive_answer_does_not_append_lower_ranked_topics(self) -> None:
+        answer = self.engine.ask("What is the emergency vibration threshold?")
+        self.assertEqual(len(answer.citations), 1)
+        self.assertNotIn("manufactured parts", answer.text)
+
     def test_answer_refuses_when_no_evidence_matches(self) -> None:
         answerer = ExtractiveAnswerer(minimum_dense_score=0.95)
         answer = answerer.answer("Who won the championship?", self.engine.search("championship"))
