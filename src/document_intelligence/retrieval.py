@@ -51,8 +51,12 @@ class BM25Index:
         query_terms = set(content_tokens(query))
         if not query_terms:
             return np.zeros(len(self.term_frequencies), dtype=np.float32)
+        coverages = [
+            len(query_terms & set(frequencies)) / len(query_terms)
+            for frequencies in self.term_frequencies
+        ]
         return np.asarray(
-            [len(query_terms & set(frequencies)) / len(query_terms) for frequencies in self.term_frequencies],
+            coverages,
             dtype=np.float32,
         )
 

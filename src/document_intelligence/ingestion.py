@@ -135,7 +135,8 @@ def chunk_document(
             if pending_start is None:
                 pending_start = block.start()
             continue
-        passages.append((pending_start if pending_start is not None else block.start(), block.end()))
+        start = pending_start if pending_start is not None else block.start()
+        passages.append((start, block.end()))
         pending_start = None
     if pending_start is not None:
         passages.append((pending_start, len(text)))
