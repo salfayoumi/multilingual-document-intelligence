@@ -70,6 +70,32 @@ def _best_sentence(query: str, result: SearchResult) -> str:
     return selected if len(selected) <= 360 else selected[:357].rstrip() + "…"
 
 
+def _has_decisive_lexical_lead(
+    query: str,
+    top_result: SearchResult,
+    runner_up: SearchResult,
+) -> bool:
+    """Return whether exact terms safely resolve a close semantic match.
+
+    Multilingual queries often have no lexical overlap with their evidence, so
+    semantic ambiguity remains conservative by default. For same-language
+    questions, however, a result that covers at least half of the meaningful
+    query terms and clearly exceeds the runner-up's overlap is strong evidence
+    that a small dense-score margin is not genuinely ambiguous.
+    """
+
+    query_terms = set(content_tokens(query))
+    if not query_terms or top_result.lexical_score <= runner_up.lexical_score:
+        return False
+    top_coverage = len(query_terms & set(content_tokens(top_result.chunk.text))) / len(
+        query_terms
+    )
+    runner_up_coverage = len(
+        query_terms & set(content_tokens(runner_up.chunk.text))
+    ) / len(query_terms)
+    return top_coverage >= 0.5 and top_coverage - runner_up_coverage >= 0.25
+
+
 class Answerer(Protocol):
     mode: str
 
@@ -98,6 +124,7 @@ class ExtractiveAnswerer:
             len(results) > 1
             and results[1].score >= self.minimum_score
             and results[0].score - results[1].score < self.minimum_margin
+            and not _has_decisive_lexical_lead(query, results[0], results[1])
         ):
             selected = []
         else:

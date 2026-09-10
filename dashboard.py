@@ -157,16 +157,26 @@ with ask_tab:
             answer = engine.ask(query)
             if answer.supported:
                 st.markdown(answer.text)
+                chunk_languages = {chunk.id: chunk.language for chunk in engine.chunks}
+                evidence_languages = tuple(
+                    dict.fromkeys(
+                        chunk_languages.get(citation.chunk_id, "unknown")
+                        for citation in answer.citations
+                    )
+                )
+                evidence_label = " · ".join(code.upper() for code in evidence_languages)
                 st.caption(
                     f"Evidence confidence {answer.confidence:.0%} · {answer.mode} · "
-                    f"language {answer.language}"
+                    f"query {answer.language.upper()} · evidence {evidence_label}"
                 )
                 st.subheader("Evidence")
                 for citation in answer.citations:
                     page = f" · page {citation.page}" if citation.page else ""
+                    passage_language = chunk_languages.get(citation.chunk_id, "unknown").upper()
                     st.markdown(
                         f"<div class='source-card'><strong>[{citation.number}] "
-                        f"{citation.source}</strong>{page}<br>{citation.snippet}</div>",
+                        f"{citation.source} · {passage_language}</strong>{page}<br>"
+                        f"{citation.snippet}</div>",
                         unsafe_allow_html=True,
                     )
             else:
