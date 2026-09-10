@@ -5,7 +5,9 @@ import unittest
 import numpy as np
 
 from document_intelligence import DocumentIntelligence, document_from_text
+from document_intelligence.answering import ExtractiveAnswerer
 from document_intelligence.encoders import HashingEncoder
+from document_intelligence.models import Chunk, SearchResult
 
 
 class ConceptEncoder:
@@ -98,6 +100,70 @@ class RetrievalTests(unittest.TestCase):
         answer = engine.ask("متى يجب تصعيد إنذار الاهتزاز؟")
         self.assertTrue(answer.supported)
         self.assertEqual(answer.citations[0].source, "motor_en.md")
+
+    def test_decisive_lexical_overlap_resolves_close_semantic_scores(self) -> None:
+        query = "What temperature requires the equipment to be stopped?"
+        results = [
+            SearchResult(
+                Chunk(
+                    id="temperature",
+                    document_id="maintenance",
+                    source="maintenance_en.md",
+                    text=(
+                        "## Temperature response\n\nAt 90 °C, stop the equipment and "
+                        "investigate before restarting."
+                    ),
+                    language="en",
+                    position=0,
+                ),
+                score=0.615,
+                dense_score=0.615,
+                lexical_score=4.677,
+                rank=1,
+            ),
+            SearchResult(
+                Chunk(
+                    id="unrelated",
+                    document_id="safety",
+                    source="safety_ar.md",
+                    text="يجب عزل مصدر الكهرباء قبل فتح غطاء المعدة.",
+                    language="ar",
+                    position=0,
+                ),
+                score=0.608,
+                dense_score=0.608,
+                lexical_score=0.0,
+                rank=2,
+            ),
+        ]
+
+        answer = ExtractiveAnswerer().answer(query, results)
+
+        self.assertTrue(answer.supported)
+        self.assertEqual(answer.citations[0].source, "maintenance_en.md")
+
+    def test_close_semantic_scores_without_lexical_evidence_remain_unsupported(self) -> None:
+        results = [
+            SearchResult(
+                Chunk("first", "one", "one.md", "First possible topic.", "en", 0),
+                score=0.61,
+                dense_score=0.61,
+                lexical_score=0.0,
+                rank=1,
+            ),
+            SearchResult(
+                Chunk("second", "two", "two.md", "Second possible topic.", "en", 0),
+                score=0.59,
+                dense_score=0.59,
+                lexical_score=0.0,
+                rank=2,
+            ),
+        ]
+
+        answer = ExtractiveAnswerer().answer("ما الإجراء المطلوب؟", results)
+
+        self.assertFalse(answer.supported)
+        self.assertEqual(answer.citations, ())
 
 
 if __name__ == "__main__":

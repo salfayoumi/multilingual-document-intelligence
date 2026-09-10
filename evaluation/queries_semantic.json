@@ -4,6 +4,10 @@
     "relevant_sources": ["quality_tr.md"]
   },
   {
+    "query": "What temperature requires the equipment to be stopped?",
+    "relevant_sources": ["maintenance_en.md"]
+  },
+  {
     "query": "Filtre değiştirme aralığı nedir?",
     "relevant_sources": ["maintenance_tr.md"]
   },
