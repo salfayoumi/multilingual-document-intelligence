@@ -2,9 +2,29 @@ from __future__ import annotations
 
 import unittest
 
+import numpy as np
+
 from document_intelligence import DocumentIntelligence, document_from_text
-from document_intelligence.answering import ExtractiveAnswerer
 from document_intelligence.encoders import HashingEncoder
+
+
+class ConceptEncoder:
+    """Tiny deterministic encoder used to test cross-language retrieval logic."""
+
+    name = "test-multilingual-concepts"
+    cross_language = True
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        vectors = []
+        for text in texts:
+            normalized = text.casefold()
+            vectors.append(
+                [
+                    float(any(term in normalized for term in ("vibration", "titreşim", "اهتزاز"))),
+                    float(any(term in normalized for term in ("filter", "filtre", "مرشح"))),
+                ]
+            )
+        return np.asarray(vectors, dtype=np.float32)
 
 
 class RetrievalTests(unittest.TestCase):
@@ -49,10 +69,35 @@ class RetrievalTests(unittest.TestCase):
         self.assertNotIn("manufactured parts", answer.text)
 
     def test_answer_refuses_when_no_evidence_matches(self) -> None:
-        answerer = ExtractiveAnswerer(minimum_dense_score=0.95)
-        answer = answerer.answer("Who won the championship?", self.engine.search("championship"))
+        answer = self.engine.ask("Who won the World Cup in 2022?")
         self.assertFalse(answer.supported)
         self.assertEqual(answer.citations, ())
+        self.assertEqual(answer.confidence, 0.0)
+
+    def test_confidence_is_absolute_evidence_not_rank_normalization(self) -> None:
+        answer = self.engine.ask("What is the emergency vibration threshold?")
+        self.assertTrue(answer.supported)
+        self.assertGreater(answer.confidence, 0.32)
+        self.assertLess(answer.confidence, 1.0)
+
+    def test_cross_language_query_can_retrieve_supported_evidence(self) -> None:
+        engine = DocumentIntelligence(encoder=ConceptEncoder())
+        engine.index_documents(
+            [
+                document_from_text(
+                    "motor_en.md",
+                    "The vibration alarm must be escalated after ten continuous seconds.",
+                ),
+                document_from_text(
+                    "filter_tr.md",
+                    "Ana hat filtresi her beş yüz çalışma saatinde değiştirilir.",
+                ),
+            ]
+        )
+
+        answer = engine.ask("متى يجب تصعيد إنذار الاهتزاز؟")
+        self.assertTrue(answer.supported)
+        self.assertEqual(answer.citations[0].source, "motor_en.md")
 
 
 if __name__ == "__main__":

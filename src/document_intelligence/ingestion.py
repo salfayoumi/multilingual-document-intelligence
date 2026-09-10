@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from bisect import bisect_right
 from collections.abc import Iterable
 from pathlib import Path
 
-from .language import detect_language
+from .language import detect_languages
 from .models import Chunk, Document
 
 SUPPORTED_SUFFIXES = {".txt", ".md", ".pdf", ".docx"}
@@ -26,12 +27,24 @@ def document_from_text(
     metadata: dict | None = None,
 ) -> Document:
     clean_text = text.strip()
+    detected_languages = detect_languages(clean_text)
+    if language and language != "mixed":
+        languages = (language,) if language != "unknown" else detected_languages
+        language_label = language
+    else:
+        languages = detected_languages
+        language_label = (
+            "mixed" if len(languages) > 1 else languages[0] if languages else "unknown"
+        )
+    document_metadata = dict(metadata or {})
+    document_metadata["languages"] = list(languages)
     return Document(
         id=_stable_id(name, clean_text),
         name=name,
         text=clean_text,
-        language=language or detect_language(clean_text),
-        metadata=dict(metadata or {}),
+        language=language_label,
+        languages=languages,
+        metadata=document_metadata,
     )
 
 
@@ -104,47 +117,83 @@ def chunk_document(
 
     chunks: list[Chunk] = []
     text = document.text
-    start = 0
     position = 0
     page_offsets = list(document.metadata.get("page_offsets", []))
 
-    while start < len(text):
-        tentative_end = min(len(text), start + chunk_size)
-        end = tentative_end
-        if tentative_end < len(text):
-            paragraph_break = text.rfind("\n", start + chunk_size // 2, tentative_end)
-            sentence_break = max(
-                text.rfind(". ", start + chunk_size // 2, tentative_end),
-                text.rfind("؟ ", start + chunk_size // 2, tentative_end),
-                text.rfind("! ", start + chunk_size // 2, tentative_end),
-            )
-            best_break = max(paragraph_break, sentence_break)
-            if best_break > start:
-                end = best_break + 1
+    # Blank-line blocks preserve paragraphs from PDF/DOCX/TXT and Markdown.
+    # Short headings are attached to the following paragraph, producing
+    # topical passages instead of one file-sized chunk.
+    blocks = list(re.finditer(r"\S(?:.*?)(?=\n\s*\n|\Z)", text, re.S))
+    passages: list[tuple[int, int]] = []
+    pending_start: int | None = None
+    for block in blocks:
+        block_text = block.group(0).strip()
+        is_heading = block_text.startswith("#") or (
+            len(block_text) <= 80 and not block_text.endswith((".", "!", "?", "؟", "؛"))
+        )
+        if is_heading:
+            if pending_start is None:
+                pending_start = block.start()
+            continue
+        start = pending_start if pending_start is not None else block.start()
+        passages.append((start, block.end()))
+        pending_start = None
+    if pending_start is not None:
+        passages.append((pending_start, len(text)))
+    if not passages and text.strip():
+        passages.append((0, len(text)))
 
-        chunk_text = text[start:end].strip()
-        if chunk_text:
-            metadata = {"start_char": start, "end_char": end}
-            page = _page_for_offset(start, page_offsets)
-            if page is not None:
-                metadata["page"] = page
-            chunks.append(
-                Chunk(
-                    id=_stable_id(document.id, str(position), chunk_text),
-                    document_id=document.id,
-                    source=document.name,
-                    text=chunk_text,
-                    language=document.language,
-                    position=position,
-                    metadata=metadata,
+    for passage_start, passage_end in passages:
+        start = passage_start
+        while start < passage_end:
+            tentative_end = min(passage_end, start + chunk_size)
+            end = tentative_end
+            if tentative_end < passage_end:
+                paragraph_break = text.rfind("\n", start + chunk_size // 2, tentative_end)
+                sentence_break = max(
+                    text.rfind(". ", start + chunk_size // 2, tentative_end),
+                    text.rfind("؟ ", start + chunk_size // 2, tentative_end),
+                    text.rfind("! ", start + chunk_size // 2, tentative_end),
                 )
-            )
-            position += 1
-        if end >= len(text):
-            break
-        start = max(start + 1, end - overlap)
-        while start < len(text) and text[start].isspace():
-            start += 1
+                best_break = max(paragraph_break, sentence_break)
+                if best_break > start:
+                    end = best_break + 1
+
+            chunk_text = text[start:end].strip()
+            if chunk_text:
+                languages = detect_languages(chunk_text)
+                language_label = (
+                    "mixed"
+                    if len(languages) > 1
+                    else languages[0]
+                    if languages
+                    else document.language
+                )
+                metadata = {
+                    "start_char": start,
+                    "end_char": end,
+                    "languages": list(languages or document.languages),
+                }
+                page = _page_for_offset(start, page_offsets)
+                if page is not None:
+                    metadata["page"] = page
+                chunks.append(
+                    Chunk(
+                        id=_stable_id(document.id, str(position), chunk_text),
+                        document_id=document.id,
+                        source=document.name,
+                        text=chunk_text,
+                        language=language_label,
+                        position=position,
+                        metadata=metadata,
+                    )
+                )
+                position += 1
+            if end >= passage_end:
+                break
+            start = max(start + 1, end - overlap)
+            while start < passage_end and text[start].isspace():
+                start += 1
     return chunks
 
 

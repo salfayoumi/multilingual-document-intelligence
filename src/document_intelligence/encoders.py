@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from typing import Protocol
 
 import numpy as np
@@ -11,6 +12,7 @@ from sklearn.feature_extraction.text import HashingVectorizer
 
 class TextEncoder(Protocol):
     name: str
+    cross_language: bool
 
     def encode(self, texts: list[str]) -> np.ndarray: ...
 
@@ -23,6 +25,7 @@ class HashingEncoder:
     """
 
     name = "hashing-char-ngrams"
+    cross_language = False
 
     def __init__(self, dimensions: int = 2048) -> None:
         self.vectorizer = HashingVectorizer(
@@ -40,12 +43,15 @@ class HashingEncoder:
         return self.vectorizer.transform(texts).toarray().astype(np.float32)
 
 
-class SentenceTransformerEncoder:
-    name = "multilingual-sentence-transformer"
+class FastEmbedEncoder:
+    """Compact ONNX multilingual embeddings suitable for the hosted demo."""
+
+    name = "fastembed-multilingual-minilm"
+    cross_language = True
 
     def __init__(self, model_name: str | None = None) -> None:
         try:
-            from sentence_transformers import SentenceTransformer
+            from fastembed import TextEmbedding
         except ImportError as exc:
             raise RuntimeError(
                 "Semantic retrieval requires: pip install -e '.[semantic]'"
@@ -55,25 +61,29 @@ class SentenceTransformerEncoder:
             "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         )
         self.model_name = selected_model
-        self.model = SentenceTransformer(selected_model)
+        try:
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"The model .* now uses mean pooling instead of CLS embedding.*",
+                    category=UserWarning,
+                )
+                self.model = TextEmbedding(model_name=selected_model, threads=2)
+        except Exception as exc:
+            raise RuntimeError(f"Could not load multilingual embedding model: {exc}") from exc
+        self.dimensions = self.model.embedding_size
 
     def encode(self, texts: list[str]) -> np.ndarray:
         if not texts:
-            return np.empty((0, 384), dtype=np.float32)
-        vectors = self.model.encode(
-            texts,
-            normalize_embeddings=True,
-            show_progress_bar=False,
-            convert_to_numpy=True,
-        )
+            return np.empty((0, self.dimensions), dtype=np.float32)
+        vectors = list(self.model.embed(texts))
         return np.asarray(vectors, dtype=np.float32)
 
 
 def create_encoder(mode: str | None = None) -> TextEncoder:
     selected = (mode or os.getenv("DOCUMENT_AI_ENCODER", "hashing")).casefold()
     if selected in {"semantic", "multilingual", "sentence-transformer"}:
-        return SentenceTransformerEncoder()
+        return FastEmbedEncoder()
     if selected in {"hashing", "offline", "fast"}:
         return HashingEncoder()
     raise ValueError("Encoder must be 'hashing' or 'semantic'")
-

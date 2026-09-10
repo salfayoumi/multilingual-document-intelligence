@@ -17,13 +17,22 @@ from .ingestion import load_directory
 class EvaluationCase:
     query: str
     relevant_sources: tuple[str, ...]
+    supported: bool = True
 
 
 def load_cases(path: str | Path) -> list[EvaluationCase]:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    return [
-        EvaluationCase(item["query"], tuple(item["relevant_sources"])) for item in payload
-    ]
+    cases: list[EvaluationCase] = []
+    for item in payload:
+        relevant_sources = tuple(item.get("relevant_sources", ()))
+        cases.append(
+            EvaluationCase(
+                item["query"],
+                relevant_sources,
+                item.get("supported", bool(relevant_sources)),
+            )
+        )
+    return cases
 
 
 def evaluate(
@@ -31,28 +40,45 @@ def evaluate(
 ) -> dict[str, float | int | str]:
     reciprocal_ranks: list[float] = []
     hits = 0
+    supported_cases = 0
+    unsupported_cases = 0
+    answer_hits = 0
+    refusal_hits = 0
     latencies: list[float] = []
     for case in cases:
         started = time.perf_counter()
         results = engine.search(case.query, top_k=top_k)
         latencies.append((time.perf_counter() - started) * 1000)
+        answer = engine.answerer.answer(case.query, results)
         relevant = set(case.relevant_sources)
-        rank = next(
-            (
-                index
-                for index, result in enumerate(results, start=1)
-                if result.chunk.source in relevant
-            ),
-            None,
-        )
-        hits += int(rank is not None)
-        reciprocal_ranks.append(1 / rank if rank else 0.0)
-    count = max(len(cases), 1)
+        if case.supported:
+            supported_cases += 1
+            rank = next(
+                (
+                    index
+                    for index, result in enumerate(results, start=1)
+                    if result.chunk.source in relevant
+                ),
+                None,
+            )
+            hits += int(rank is not None)
+            reciprocal_ranks.append(1 / rank if rank else 0.0)
+            cited_sources = {citation.source for citation in answer.citations}
+            answer_hits += int(answer.supported and bool(cited_sources & relevant))
+        else:
+            unsupported_cases += 1
+            refusal_hits += int(not answer.supported)
+    retrieval_count = max(supported_cases, 1)
+    answer_count = max(supported_cases + unsupported_cases, 1)
     return {
         "cases": len(cases),
-        f"hit_rate@{top_k}": round(hits / count, 4),
-        "mean_reciprocal_rank": round(sum(reciprocal_ranks) / count, 4),
-        "mean_latency_ms": round(sum(latencies) / count, 2),
+        "supported_cases": supported_cases,
+        "unsupported_cases": unsupported_cases,
+        f"hit_rate@{top_k}": round(hits / retrieval_count, 4),
+        "mean_reciprocal_rank": round(sum(reciprocal_ranks) / retrieval_count, 4),
+        "answer_accuracy": round((answer_hits + refusal_hits) / answer_count, 4),
+        "refusal_accuracy": round(refusal_hits / max(unsupported_cases, 1), 4),
+        "mean_latency_ms": round(sum(latencies) / max(len(cases), 1), 2),
         "encoder": engine.encoder.name,
     }
 

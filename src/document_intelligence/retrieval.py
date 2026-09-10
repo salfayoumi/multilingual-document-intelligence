@@ -8,7 +8,7 @@ from collections import Counter
 import numpy as np
 
 from .encoders import TextEncoder
-from .language import tokenize
+from .language import content_tokens
 from .models import Chunk, SearchResult
 
 
@@ -16,7 +16,7 @@ class BM25Index:
     def __init__(self, chunks: list[Chunk], k1: float = 1.5, b: float = 0.75) -> None:
         self.k1 = k1
         self.b = b
-        self.term_frequencies = [Counter(tokenize(chunk.text)) for chunk in chunks]
+        self.term_frequencies = [Counter(content_tokens(chunk.text)) for chunk in chunks]
         self.lengths = [sum(counter.values()) for counter in self.term_frequencies]
         self.average_length = sum(self.lengths) / max(len(self.lengths), 1)
         document_frequency: Counter[str] = Counter()
@@ -29,7 +29,7 @@ class BM25Index:
         }
 
     def score(self, query: str) -> np.ndarray:
-        query_terms = tokenize(query)
+        query_terms = content_tokens(query)
         scores = np.zeros(len(self.term_frequencies), dtype=np.float32)
         for index, frequencies in enumerate(self.term_frequencies):
             length = self.lengths[index]
@@ -44,6 +44,21 @@ class BM25Index:
                     frequency * (self.k1 + 1) / denominator
                 )
         return scores
+
+    def coverage(self, query: str) -> np.ndarray:
+        """Return the share of unique query terms present in each passage."""
+
+        query_terms = set(content_tokens(query))
+        if not query_terms:
+            return np.zeros(len(self.term_frequencies), dtype=np.float32)
+        coverages = [
+            len(query_terms & set(frequencies)) / len(query_terms)
+            for frequencies in self.term_frequencies
+        ]
+        return np.asarray(
+            coverages,
+            dtype=np.float32,
+        )
 
 
 def _normalize_rows(matrix: np.ndarray) -> np.ndarray:
@@ -61,12 +76,35 @@ class HybridRetriever:
         self.bm25 = BM25Index(chunks)
         self.vectors = _normalize_rows(encoder.encode([chunk.text for chunk in chunks]))
 
-    @staticmethod
-    def _ranks(scores: np.ndarray) -> np.ndarray:
-        order = np.argsort(-scores, kind="stable")
-        ranks = np.empty_like(order)
-        ranks[order] = np.arange(1, len(order) + 1)
-        return ranks
+    def _reciprocal_ranks(self, scores: np.ndarray) -> np.ndarray:
+        """Return RRF contributions without ranking zero-evidence candidates."""
+
+        contributions = np.zeros(len(scores), dtype=np.float32)
+        valid = np.flatnonzero(scores > 0)
+        if not len(valid):
+            return contributions
+        order = valid[np.argsort(-scores[valid], kind="stable")]
+        contributions[order] = 1 / (self.fusion_k + np.arange(1, len(order) + 1))
+        return contributions
+
+    def _evidence_scores(
+        self,
+        dense_scores: np.ndarray,
+        lexical_scores: np.ndarray,
+        lexical_coverage: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Map raw retrieval signals to an absolute, non-rank confidence score."""
+
+        dense_support = np.clip(dense_scores, 0.0, 1.0)
+        lexical_strength = 1 - np.exp(-np.maximum(lexical_scores, 0.0) / 3.0)
+        lexical_support = lexical_strength * np.sqrt(lexical_coverage)
+        if getattr(self.encoder, "cross_language", False):
+            evidence = dense_support
+            ranking = 0.85 * dense_support + 0.15 * lexical_support
+        else:
+            evidence = np.maximum(dense_support, lexical_support)
+            ranking = 0.55 * dense_support + 0.45 * lexical_support
+        return evidence.astype(np.float32), ranking.astype(np.float32)
 
     def search(
         self,
@@ -84,15 +122,16 @@ class HybridRetriever:
         query_vector = _normalize_rows(self.encoder.encode([query]))[0]
         dense_scores = self.vectors @ query_vector
         lexical_scores = self.bm25.score(query)
-        dense_ranks = self._ranks(dense_scores)
-        lexical_ranks = self._ranks(lexical_scores)
+        lexical_coverage = self.bm25.coverage(query)
+        fused = dense_weight * self._reciprocal_ranks(dense_scores)
+        fused += (1 - dense_weight) * self._reciprocal_ranks(lexical_scores)
+        evidence_scores, ranking_scores = self._evidence_scores(
+            dense_scores, lexical_scores, lexical_coverage
+        )
 
-        fused = dense_weight / (self.fusion_k + dense_ranks)
-        fused += (1 - dense_weight) / (self.fusion_k + lexical_ranks)
-        if fused.max() > 0:
-            fused = fused / fused.max()
-
-        candidate_indices = np.argsort(-fused, kind="stable")
+        # Calibrated hybrid evidence decides rank. RRF breaks ties between
+        # candidates with similarly strong semantic and lexical support.
+        candidate_indices = np.lexsort((-fused, -ranking_scores))
         results: list[SearchResult] = []
         for index in candidate_indices:
             chunk = self.chunks[int(index)]
@@ -101,7 +140,7 @@ class HybridRetriever:
             results.append(
                 SearchResult(
                     chunk=chunk,
-                    score=float(fused[index]),
+                    score=float(evidence_scores[index]),
                     dense_score=float(dense_scores[index]),
                     lexical_score=float(lexical_scores[index]),
                     rank=len(results) + 1,
@@ -110,4 +149,3 @@ class HybridRetriever:
             if len(results) >= top_k:
                 break
         return results
-
