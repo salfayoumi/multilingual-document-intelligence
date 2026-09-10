@@ -9,7 +9,7 @@ import urllib.error
 import urllib.request
 from typing import Protocol
 
-from .language import detect_language, split_sentences, tokenize
+from .language import content_tokens, detect_language, split_sentences
 from .models import Answer, Citation, SearchResult
 
 CITATION_PATTERN = re.compile(r"\[(\d+)]")
@@ -41,17 +41,32 @@ def _citations(results: list[SearchResult]) -> tuple[Citation, ...]:
 
 
 def _best_sentence(query: str, result: SearchResult) -> str:
-    query_terms = set(tokenize(query))
-    sentences = split_sentences(result.chunk.text)
+    query_terms = set(content_tokens(query))
+    body = "\n".join(
+        line for line in result.chunk.text.splitlines() if not line.lstrip().startswith("#")
+    ).strip()
+    sentences = split_sentences(body)
     if not sentences:
-        return result.chunk.text[:320].strip()
+        return body[:360].strip()
+    if len(body) <= 360:
+        return " ".join(sentences)
 
     def score(sentence: str) -> tuple[float, int]:
-        sentence_terms = set(tokenize(sentence))
+        sentence_terms = set(content_tokens(sentence))
         overlap = len(query_terms & sentence_terms) / max(len(query_terms), 1)
         return overlap, -len(sentence)
 
-    selected = max(sentences, key=score)
+    scored = [score(sentence) for sentence in sentences]
+    best_index = max(range(len(sentences)), key=lambda index: scored[index])
+
+    # A cross-language query has little or no lexical overlap. The retrieved
+    # passage is already topical, so returning its compact body is safer than
+    # choosing an arbitrary short sentence.
+    if scored[best_index][0] == 0:
+        selected = " ".join(sentences)
+    else:
+        start = best_index if best_index + 1 < len(sentences) else max(0, best_index - 1)
+        selected = " ".join(sentences[start : best_index + 2])
     return selected if len(selected) <= 360 else selected[:357].rstrip() + "…"
 
 
@@ -64,13 +79,29 @@ class Answerer(Protocol):
 class ExtractiveAnswerer:
     mode = "extractive-citation-first"
 
-    def __init__(self, *, minimum_dense_score: float = 0.05, max_sources: int = 1) -> None:
-        self.minimum_dense_score = minimum_dense_score
+    def __init__(
+        self,
+        *,
+        minimum_score: float = 0.32,
+        minimum_margin: float = 0.06,
+        max_sources: int = 1,
+    ) -> None:
+        self.minimum_score = minimum_score
+        self.minimum_margin = minimum_margin
         self.max_sources = max_sources
 
     def answer(self, query: str, results: list[SearchResult]) -> Answer:
         language = detect_language(query)
-        selected = [result for result in results if result.dense_score >= self.minimum_dense_score]
+        if not results or results[0].score < self.minimum_score:
+            selected: list[SearchResult] = []
+        elif (
+            len(results) > 1
+            and results[1].score >= self.minimum_score
+            and results[0].score - results[1].score < self.minimum_margin
+        ):
+            selected = []
+        else:
+            selected = [result for result in results if result.score >= self.minimum_score]
         selected = selected[: self.max_sources]
         if not selected:
             return Answer(
@@ -110,9 +141,12 @@ class OpenAICompatibleAnswerer:
         self.fallback = ExtractiveAnswerer()
 
     def answer(self, query: str, results: list[SearchResult]) -> Answer:
-        selected = results[:4]
-        if not selected:
-            return self.fallback.answer(query, results)
+        grounded_fallback = self.fallback.answer(query, results)
+        if not grounded_fallback.supported:
+            return grounded_fallback
+        selected = [result for result in results if result.score >= self.fallback.minimum_score][
+            :4
+        ]
         context = "\n\n".join(
             f"SOURCE [{index}] — {result.chunk.source}\n{result.chunk.text}"
             for index, result in enumerate(selected, start=1)
@@ -143,12 +177,12 @@ class OpenAICompatibleAnswerer:
                 data = json.loads(response.read().decode("utf-8"))
             text = data["choices"][0]["message"]["content"].strip()
         except (urllib.error.URLError, TimeoutError, KeyError, ValueError, json.JSONDecodeError):
-            return self.fallback.answer(query, selected)
+            return grounded_fallback
 
         valid_numbers = set(range(1, len(selected) + 1))
         used_numbers = {int(value) for value in CITATION_PATTERN.findall(text)}
         if not used_numbers or not used_numbers <= valid_numbers:
-            return self.fallback.answer(query, selected)
+            return grounded_fallback
         used_results = [selected[number - 1] for number in sorted(used_numbers)]
         return Answer(
             query=query,

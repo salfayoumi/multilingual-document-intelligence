@@ -18,7 +18,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install project
-        run: pip install -e ".[app,dev]"
+        run: pip install -e ".[app,semantic,dev]"
       - name: Lint
         run: python -m ruff check .
       - name: Test

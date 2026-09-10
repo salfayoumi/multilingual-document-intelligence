@@ -26,7 +26,7 @@ engine = DocumentIntelligence()
 class TextDocumentRequest(BaseModel):
     name: str = Field(min_length=1, max_length=180)
     text: str = Field(min_length=1)
-    language: str | None = Field(default=None, pattern="^(ar|tr|en|unknown)$")
+    language: str | None = Field(default=None, pattern="^(ar|tr|en|mixed|unknown)$")
 
 
 class QueryRequest(BaseModel):

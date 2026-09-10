@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 
@@ -50,12 +51,17 @@ st.markdown(
 )
 
 
+@st.cache_resource(show_spinner="Loading multilingual retrieval model…")
+def cached_encoder(mode: str):
+    return create_encoder(mode)
+
+
 def new_engine(mode: str) -> DocumentIntelligence:
-    return DocumentIntelligence(encoder=create_encoder(mode))
+    return DocumentIntelligence(encoder=cached_encoder(mode))
 
 
 if "encoder_mode" not in st.session_state:
-    st.session_state.encoder_mode = "hashing"
+    st.session_state.encoder_mode = os.getenv("DOCUMENT_AI_ENCODER", "semantic").casefold()
 if "engine" not in st.session_state:
     st.session_state.engine = new_engine(st.session_state.encoder_mode)
 
@@ -63,8 +69,12 @@ with st.sidebar:
     st.header("Workspace")
     selected_label = st.selectbox(
         "Retrieval model",
-        ["Offline · fast", "Semantic · cross-language"],
-        help="Semantic mode requires the optional sentence-transformers dependency.",
+        ["Semantic · cross-language", "Offline · same-language"],
+        index=0 if st.session_state.encoder_mode == "semantic" else 1,
+        help=(
+            "Semantic mode matches meaning across Arabic, Turkish, and English. "
+            "Offline mode is a faster lexical fallback for same-language questions."
+        ),
     )
     requested_mode = "semantic" if selected_label.startswith("Semantic") else "hashing"
     if requested_mode != st.session_state.encoder_mode:
@@ -72,12 +82,13 @@ with st.sidebar:
             st.session_state.engine = new_engine(requested_mode)
             st.session_state.encoder_mode = requested_mode
             st.success("Retrieval model changed. Re-index your documents.")
-        except RuntimeError as exc:
+        except (RuntimeError, ValueError) as exc:
             st.error(str(exc))
 
     if st.button("Load multilingual demo", use_container_width=True):
         st.session_state.engine.add_documents(load_directory(ROOT / "demo_docs"))
-        st.success("Demo documents indexed")
+        detected = " · ".join(code.upper() for code in st.session_state.engine.stats()["languages"])
+        st.success(f"Demo documents indexed · {detected}")
 
     uploads = st.file_uploader(
         "Add documents",
@@ -104,7 +115,14 @@ with st.sidebar:
                 )
             )
         st.session_state.engine.add_documents(documents)
-        st.success(f"Indexed {len(documents)} document(s)")
+        detected = " · ".join(code.upper() for code in st.session_state.engine.stats()["languages"])
+        st.success(f"Indexed {len(documents)} document(s) · detected {detected}")
+
+    if st.session_state.engine.documents:
+        with st.expander("Indexed documents", expanded=False):
+            for document in st.session_state.engine.documents.values():
+                languages = " · ".join(code.upper() for code in document.languages) or "UNKNOWN"
+                st.caption(f"{document.name} · {languages}")
 
     if st.button("Clear session", use_container_width=True):
         st.session_state.engine.clear()
@@ -115,10 +133,12 @@ stats = engine.stats()
 metric_cols = st.columns(4)
 metric_cols[0].metric("Documents", stats["documents"])
 metric_cols[1].metric("Passages", stats["chunks"])
-language_count = len({document.language for document in engine.documents.values()})
+language_codes = tuple(stats["languages"])
 answer_label = "Grounded" if "grounded" in str(stats["answer_mode"]) else "Extractive"
-metric_cols[2].metric("Languages", language_count)
+metric_cols[2].metric("Languages", len(language_codes))
 metric_cols[3].metric("Answer mode", answer_label)
+if language_codes:
+    st.caption("Detected languages: " + " · ".join(code.upper() for code in language_codes))
 
 ask_tab, search_tab, evaluate_tab = st.tabs(["Ask", "Inspect retrieval", "Evaluate"])
 
@@ -138,7 +158,7 @@ with ask_tab:
             if answer.supported:
                 st.markdown(answer.text)
                 st.caption(
-                    f"Confidence {answer.confidence:.0%} · {answer.mode} · "
+                    f"Evidence confidence {answer.confidence:.0%} · {answer.mode} · "
                     f"language {answer.language}"
                 )
                 st.subheader("Evidence")
@@ -158,7 +178,9 @@ with search_tab:
     dense_weight = st.slider("Semantic weight", 0.0, 1.0, 0.60, 0.05)
     if search_query and engine.documents:
         for result in engine.search(search_query, top_k=8, dense_weight=dense_weight):
-            with st.expander(f"#{result.rank} · {result.chunk.source} · {result.score:.0%}"):
+            with st.expander(
+                f"#{result.rank} · {result.chunk.source} · evidence {result.score:.0%}"
+            ):
                 st.markdown(
                     f"<span class='lang-pill'>{result.chunk.language.upper()}</span>",
                     unsafe_allow_html=True,

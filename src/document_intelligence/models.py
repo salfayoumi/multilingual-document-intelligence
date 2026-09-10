@@ -12,11 +12,14 @@ class Document:
     name: str
     text: str
     language: str
+    languages: tuple[str, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.text.strip():
             raise ValueError("Document text cannot be empty")
+        if not self.languages and self.language not in {"unknown", "mixed"}:
+            object.__setattr__(self, "languages", (self.language,))
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,4 +82,3 @@ class Answer:
                 for item in self.citations
             ],
         }
-

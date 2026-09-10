@@ -4,8 +4,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from document_intelligence import DocumentIntelligence
 from document_intelligence.ingestion import chunk_document, document_from_text, load_document
-from document_intelligence.language import detect_language, normalize_text, tokenize
+from document_intelligence.language import (
+    content_tokens,
+    detect_language,
+    detect_languages,
+    normalize_text,
+    tokenize,
+)
 
 
 class LanguageTests(unittest.TestCase):
@@ -14,11 +21,21 @@ class LanguageTests(unittest.TestCase):
         self.assertEqual(
             detect_language("Bu sistem için bakım yapılması gereken süre nedir?"), "tr"
         )
+        self.assertEqual(detect_language("Numune planı"), "tr")
         self.assertEqual(detect_language("يجب إيقاف المعدة قبل بدء أعمال الصيانة."), "ar")
 
     def test_normalizes_arabic_diacritics(self) -> None:
         self.assertEqual(normalize_text("السَّلَامُ"), "السلام")
         self.assertIn("bakım", tokenize("Bakım için kontrol"))
+
+    def test_detects_every_language_in_mixed_text(self) -> None:
+        text = (
+            "The maintenance report explains the shutdown procedure.\n\n"
+            "Bakım raporu sistemin durdurulma sürecini açıklar.\n\n"
+            "يشرح تقرير الصيانة خطوات إيقاف النظام قبل الفحص."
+        )
+        self.assertEqual(detect_languages(text), ("en", "tr", "ar"))
+        self.assertNotIn("the", content_tokens("Who won the World Cup in 2022?"))
 
 
 class IngestionTests(unittest.TestCase):
@@ -38,6 +55,32 @@ class IngestionTests(unittest.TestCase):
         self.assertGreater(len(first), 2)
         self.assertEqual([chunk.id for chunk in first], [chunk.id for chunk in second])
         self.assertLess(first[1].metadata["start_char"], first[0].metadata["end_char"])
+
+    def test_mixed_document_creates_language_aware_passages(self) -> None:
+        document = document_from_text(
+            "mixed.md",
+            """# Operations guide
+
+The vibration alarm is escalated after ten seconds.
+
+## Bakım notu
+
+Filtre her beş yüz çalışma saatinde değiştirilir.
+
+## تعليمات السلامة
+
+يجب عزل مصدر الكهرباء قبل فتح غطاء المعدة.
+""",
+        )
+        chunks = chunk_document(document)
+
+        self.assertEqual(document.language, "mixed")
+        self.assertEqual(set(document.languages), {"ar", "tr", "en"})
+        self.assertEqual({chunk.language for chunk in chunks}, {"ar", "tr", "en"})
+
+        engine = DocumentIntelligence()
+        stats = engine.index_documents([document])
+        self.assertEqual(set(stats["languages"]), {"ar", "tr", "en"})
 
 
 if __name__ == "__main__":

@@ -26,6 +26,15 @@
   {
     "query": "How soon should a repaired air leak be measured again?",
     "relevant_sources": ["energy_en.md"]
+  },
+  {
+    "query": "Who won the World Cup in 2022?",
+    "relevant_sources": [],
+    "supported": false
+  },
+  {
+    "query": "What is the company's annual revenue?",
+    "relevant_sources": [],
+    "supported": false
   }
 ]
-

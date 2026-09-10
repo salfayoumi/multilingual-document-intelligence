@@ -66,7 +66,8 @@ class DocumentIntelligence:
     def stats(self) -> dict[str, object]:
         languages: dict[str, int] = {}
         for document in self.documents.values():
-            languages[document.language] = languages.get(document.language, 0) + 1
+            for language in document.languages:
+                languages[language] = languages.get(language, 0) + 1
         return {
             "documents": len(self.documents),
             "chunks": len(self.chunks),

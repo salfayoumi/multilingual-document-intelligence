@@ -23,9 +23,22 @@ class EvaluationTests(unittest.TestCase):
         )
         self.assertEqual(metrics["hit_rate@1"], 1.0)
         self.assertEqual(metrics["mean_reciprocal_rank"], 1.0)
+        self.assertEqual(metrics["answer_accuracy"], 1.0)
         self.assertGreaterEqual(metrics["mean_latency_ms"], 0)
+
+    def test_scores_unsupported_question_refusal(self) -> None:
+        engine = DocumentIntelligence(encoder=HashingEncoder())
+        engine.index_documents(
+            [document_from_text("manual.md", "The pump pressure limit is eight bar.")]
+        )
+        metrics = evaluate(
+            engine,
+            [EvaluationCase("Who won the World Cup?", (), supported=False)],
+            top_k=1,
+        )
+        self.assertEqual(metrics["refusal_accuracy"], 1.0)
+        self.assertEqual(metrics["answer_accuracy"], 1.0)
 
 
 if __name__ == "__main__":
     unittest.main()
-

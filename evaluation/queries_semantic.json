@@ -1,0 +1,27 @@
+[
+  {
+    "query": "When should a production batch be quarantined?",
+    "relevant_sources": ["quality_tr.md"]
+  },
+  {
+    "query": "Filtre değiştirme aralığı nedir?",
+    "relevant_sources": ["maintenance_tr.md"]
+  },
+  {
+    "query": "متى يجب تصعيد تحذير الاهتزاز؟",
+    "relevant_sources": ["maintenance_en.md"]
+  },
+  {
+    "query": "Who is allowed to remove the lockout tag after maintenance?",
+    "relevant_sources": ["safety_ar.md"]
+  },
+  {
+    "query": "من يراجع تقرير الحادث ومتى؟",
+    "relevant_sources": ["incident_ar.md"]
+  },
+  {
+    "query": "Who won the World Cup in 2022?",
+    "relevant_sources": [],
+    "supported": false
+  }
+]
